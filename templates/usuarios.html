@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% block title %}Usuários — Produtividade Banho{% endblock %}
+{% block content %}
+<div style="max-width:820px;margin:0 auto;">
+  <div class="section-head"><div class="section-title"><i class="bi bi-people-fill"></i>Usuários</div></div>
+  {% if msg %}<div class="alert alert-ok"><i class="bi bi-check-circle-fill"></i>{{ msg }}</div>{% endif %}
+
+  <div class="panel panel-pad" style="margin-bottom:20px;">
+    <div class="section-title" style="font-size:1rem;margin-bottom:16px;"><i class="bi bi-person-plus-fill"></i>Adicionar usuário</div>
+    <form method="POST">
+      <input type="hidden" name="acao" value="adicionar">
+      <div class="grid-2">
+        <div class="field" style="margin:0;"><label class="label">Login</label><input class="input input-sm" name="novo_usuario" required autocapitalize="none"></div>
+        <div class="field" style="margin:0;"><label class="label">Nome completo</label><input class="input input-sm" name="novo_nome" required></div>
+        <div class="field" style="margin:0;"><label class="label">Senha</label><input class="input input-sm" type="text" name="nova_senha" required></div>
+        <div class="field" style="margin:0;"><label class="label">Perfil</label>
+          <select class="select input-sm" name="novo_perfil">
+            <option value="prep">Operador de preparação</option>
+            <option value="banho">Operador de banho</option>
+            <option value="admin">Administrador</option>
+          </select>
+        </div>
+        <div class="col-full"><button class="btn btn-primary btn-block"><i class="bi bi-plus-circle"></i>Adicionar usuário</button></div>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel" style="overflow:hidden;">
+    <div class="table-wrap">
+      <table class="tbl">
+        <thead><tr><th>Login</th><th>Nome</th><th>Perfil</th><th>Nova senha</th><th></th></tr></thead>
+        <tbody>
+          {% for u in usuarios %}
+          <tr>
+            <td><strong>{{ u.login }}</strong></td>
+            <td>{{ u.nome }}</td>
+            <td><span class="pill {% if u.perfil=='admin' %}pill-retrab{% elif u.perfil=='banho' %}pill-banho{% else %}pill-normal{% endif %}">{{ u.perfil }}</span></td>
+            <td>
+              <form method="POST" style="display:flex;gap:6px;min-width:200px;">
+                <input type="hidden" name="acao" value="senha">
+                <input type="hidden" name="usuario_senha" value="{{ u.login }}">
+                <input class="input input-sm" type="text" name="senha_nova" placeholder="Trocar senha" style="min-height:40px;">
+                <button class="btn btn-ghost btn-sm btn-icon" title="Salvar senha"><i class="bi bi-key-fill"></i></button>
+              </form>
+            </td>
+            <td>
+              {% if u.login != 'admin' %}
+              <form method="POST" onsubmit="return confirm('Remover {{ u.nome }}?');">
+                <input type="hidden" name="acao" value="remover">
+                <input type="hidden" name="usuario_remover" value="{{ u.login }}">
+                <button class="btn btn-stop btn-sm btn-icon"><i class="bi bi-trash-fill"></i></button>
+              </form>
+              {% else %}<span class="muted">—</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

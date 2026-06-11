@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}Entrar — Controle de Produtividade Banho{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo"><i class="bi bi-droplet-half"></i></div>
+    <h1 class="login-title">Produtividade Banho</h1>
+    <p class="login-sub">Pintura eletrostática · controle de processo</p>
+
+    {% if erro %}<div class="alert alert-err"><i class="bi bi-exclamation-triangle-fill"></i>{{ erro }}</div>{% endif %}
+
+    <form method="POST" action="{{ url_for('login') }}">
+      <div class="field">
+        <label class="label">Usuário</label>
+        <input type="text" name="usuario" class="input" placeholder="Seu login" required autofocus autocapitalize="none" autocomplete="username">
+      </div>
+      <div class="field">
+        <label class="label">Senha</label>
+        <input type="password" name="senha" class="input" placeholder="Sua senha" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn btn-primary btn-block"><i class="bi bi-box-arrow-in-right"></i>Entrar</button>
+    </form>
+
+    <div style="text-align:center;margin-top:22px;padding-top:18px;border-top:1px solid var(--line);">
+      <a href="{{ url_for('painel_publico') }}" class="small" style="color:var(--aco-700);font-weight:600;text-decoration:none;">
+        <i class="bi bi-graph-up-arrow"></i> Painel de acompanhamento (gerência)
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}

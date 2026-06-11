@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}Lista Mestra — Produtividade Banho{% endblock %}
+{% block content %}
+<div style="max-width:920px;margin:0 auto;">
+  <div class="section-head"><div class="section-title"><i class="bi bi-table"></i>Lista mestra (relatório SAP)</div></div>
+  {% if msg %}<div class="alert alert-info"><i class="bi bi-info-circle-fill"></i>{{ msg }}</div>{% endif %}
+
+  <div class="panel panel-pad" style="margin-bottom:20px;">
+    <div class="section-title" style="font-size:1rem;margin-bottom:10px;"><i class="bi bi-cloud-arrow-up"></i>Importar relatório</div>
+    <p class="small muted" style="margin-bottom:16px;">
+      Exporte o relatório do SAP em <strong>.xlsx</strong> ou <strong>.csv/.txt</strong> (separado por TAB).
+      O sistema lê as colunas: <code>Ordem</code>, <code>Material</code>, <code>Texto breve material</code> e <code>Quantidade total</code>.
+      Ordens já cadastradas são atualizadas; novas são adicionadas. Ao bipar a OP na tela de preparação, esses dados são preenchidos automaticamente.
+    </p>
+    <form method="POST" enctype="multipart/form-data">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <input type="file" class="input input-sm" name="arquivo" accept=".xlsx,.csv,.txt" required style="flex:1;min-width:200px;">
+        <button class="btn btn-primary" type="submit"><i class="bi bi-upload"></i>Importar</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel" style="overflow:hidden;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--line);">
+      <span class="section-title" style="font-size:1rem;">Ordens cadastradas</span>
+      <span class="pill pill-banho">{{ total_itens }} ordens</span>
+    </div>
+    <div class="table-wrap">
+      <table class="tbl">
+        <thead><tr><th>Ordem (OP)</th><th>Material (código)</th><th>Texto breve</th><th>Qtd total</th></tr></thead>
+        <tbody>
+          {% for i in amostra %}
+          <tr><td><strong>{{ i.ordem }}</strong></td><td>{{ i.material }}</td><td><span class="small">{{ i.texto_breve }}</span></td><td class="mono">{{ i.quantidade }}</td></tr>
+          {% else %}
+          <tr><td colspan="4" class="empty"><i class="bi bi-inbox"></i>Nenhuma ordem importada ainda.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if total_itens > amostra|length %}<p class="small muted" style="padding:12px 20px;margin:0;">Mostrando {{ amostra|length }} de {{ total_itens }} ordens.</p>{% endif %}
+  </div>
+</div>
+{% endblock %}
