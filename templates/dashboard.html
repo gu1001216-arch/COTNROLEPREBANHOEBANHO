@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard — Produtividade Banho{% endblock %}
+{% block content %}
+
+<div class="section-head">
+  <div class="section-title"><i class="bi bi-grid-1x2-fill"></i>Dashboard</div>
+  <div class="export-bar">
+    <a href="{{ url_for('download_prebanho') }}" class="btn btn-ghost btn-sm"><i class="bi bi-file-earmark-excel"></i>Excel pré-banho</a>
+    <a href="{{ url_for('download_banho') }}" class="btn btn-ghost btn-sm"><i class="bi bi-file-earmark-excel"></i>Excel banho</a>
+    <a href="{{ url_for('painel_publico') }}" target="_blank" class="btn btn-ghost btn-sm"><i class="bi bi-box-arrow-up-right"></i>Painel público</a>
+  </div>
+</div>
+
+<!-- Filtros de data -->
+<div class="panel panel-pad" style="margin-bottom:18px;">
+  <div class="filter-bar" style="margin:0;">
+    <div><label class="label">De</label><input type="date" id="fDe" class="input input-sm"></div>
+    <div><label class="label">Até</label><input type="date" id="fAte" class="input input-sm"></div>
+    <div><label class="label">Buscar</label><input type="text" id="fTexto" class="input input-sm" placeholder="Cesto, OP, código, operador…"></div>
+    <div><label class="label">Tipo</label><select id="fTipo" class="select input-sm"><option value="">Todos</option><option>Normal</option><option>Retrabalho</option></select></div>
+    <div><label class="label">Processo</label><select id="fProc" class="select input-sm"><option value="">Todos</option>{% for p in processos %}<option>{{ p }}</option>{% endfor %}</select></div>
+  </div>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-val" id="kTotal">0</div><div class="kpi-lbl"><i class="bi bi-check2-all"></i>Concluídos</div></div>
+  <div class="kpi k-amber"><div class="kpi-val" id="kAnd">0</div><div class="kpi-lbl"><i class="bi bi-hourglass-split"></i>Em andamento</div></div>
+  <div class="kpi k-green"><div class="kpi-val" id="kNormais">0</div><div class="kpi-lbl"><i class="bi bi-check-circle"></i>Normais</div></div>
+  <div class="kpi k-red"><div class="kpi-val" id="kRetrab">0</div><div class="kpi-lbl"><i class="bi bi-arrow-repeat"></i>Retrabalhos</div></div>
+  <div class="kpi k-violet"><div class="kpi-val" id="kPrep">0</div><div class="kpi-lbl"><i class="bi bi-stopwatch"></i>Méd. prep (min)</div></div>
+  <div class="kpi k-sky"><div class="kpi-val" id="kBanho">0</div><div class="kpi-lbl"><i class="bi bi-droplet"></i>Méd. banho (min)</div></div>
+</div>
+
+<div class="panel panel-pad" style="margin-bottom:18px;">
+  <div class="section-title" style="font-size:1rem;margin-bottom:14px;"><i class="bi bi-diagram-3-fill"></i>Andamento em tempo real</div>
+  <div id="andamento" class="andamento-grid"><div class="muted small">Carregando…</div></div>
+</div>
+
+<div class="chart-grid-3">
+  <div class="chart-box"><h6><i class="bi bi-pie-chart-fill"></i>Normal × Retrabalho</h6><canvas id="chartTipo" height="200"></canvas></div>
+  <div class="chart-box"><h6><i class="bi bi-bar-chart-fill"></i>Por processo</h6><canvas id="chartProc" height="200"></canvas></div>
+  <div class="chart-box"><h6><i class="bi bi-graph-up"></i>Concluídos por dia</h6><canvas id="chartDia" height="200"></canvas></div>
+</div>
+
+<div class="panel" style="overflow:hidden;">
+  <div class="table-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>#</th><th>Cesto</th><th>OP</th><th>Código</th><th>Texto breve</th><th>Qtd</th>
+        <th>Processo</th><th>Tipo</th><th>Prep</th><th>Banho</th><th>Fim</th>
+      </tr></thead>
+      <tbody id="tbody"><tr><td colspan="11" class="empty">Carregando…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>window.DASH_ENDPOINT='/api/dashboard/dados';</script>
+<script src="{{ url_for('static', filename='dash.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel de Acompanhamento — Produtividade Banho</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@600;700;800&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main class="page">
+  <div class="public-banner">
+    <h1><i class="bi bi-droplet-half"></i>Acompanhamento da Produção — Banho</h1>
+    <span class="small" style="display:flex;align-items:center;gap:7px;"><span class="live-dot"></span>Atualização automática · somente visualização</span>
+  </div>
+
+  <div class="panel panel-pad" style="margin-bottom:18px;">
+    <div class="filter-bar" style="margin:0;">
+      <div><label class="label">De</label><input type="date" id="fDe" class="input input-sm"></div>
+      <div><label class="label">Até</label><input type="date" id="fAte" class="input input-sm"></div>
+    </div>
+  </div>
+
+  <div class="kpi-row">
+    <div class="kpi"><div class="kpi-val" id="kTotal">0</div><div class="kpi-lbl"><i class="bi bi-check2-all"></i>Concluídos</div></div>
+    <div class="kpi k-amber"><div class="kpi-val" id="kAnd">0</div><div class="kpi-lbl"><i class="bi bi-hourglass-split"></i>Em andamento</div></div>
+    <div class="kpi k-green"><div class="kpi-val" id="kNormais">0</div><div class="kpi-lbl"><i class="bi bi-check-circle"></i>Normais</div></div>
+    <div class="kpi k-red"><div class="kpi-val" id="kRetrab">0</div><div class="kpi-lbl"><i class="bi bi-arrow-repeat"></i>Retrabalhos</div></div>
+    <div class="kpi k-violet"><div class="kpi-val" id="kPrep">0</div><div class="kpi-lbl"><i class="bi bi-stopwatch"></i>Méd. prep (min)</div></div>
+    <div class="kpi k-sky"><div class="kpi-val" id="kBanho">0</div><div class="kpi-lbl"><i class="bi bi-droplet"></i>Méd. banho (min)</div></div>
+  </div>
+
+  <div class="panel panel-pad" style="margin-bottom:18px;">
+    <div class="section-title" style="font-size:1rem;margin-bottom:14px;"><i class="bi bi-diagram-3-fill"></i>Andamento em tempo real</div>
+    <div id="andamento" class="andamento-grid"><div class="muted small">Carregando…</div></div>
+  </div>
+
+  <div class="chart-grid-3">
+    <div class="chart-box"><h6><i class="bi bi-pie-chart-fill"></i>Normal × Retrabalho</h6><canvas id="chartTipo" height="200"></canvas></div>
+    <div class="chart-box"><h6><i class="bi bi-bar-chart-fill"></i>Por processo</h6><canvas id="chartProc" height="200"></canvas></div>
+    <div class="chart-box"><h6><i class="bi bi-graph-up"></i>Concluídos por dia</h6><canvas id="chartDia" height="200"></canvas></div>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>window.DASH_ENDPOINT='/api/painel/dados';</script>
+<script src="{{ url_for('static', filename='dash.js') }}"></script>
+</body>
+</html>
