@@ -12,24 +12,50 @@
     <div id="fila" class="flow-list"><div class="muted small">Carregando…</div></div>
   </div>
 </div>
+
+<!-- Modal corrigir/cancelar cesto -->
+<div class="modal-overlay" id="modalCorrigir">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-head">
+      <h5><i class="bi bi-pencil-square"></i>Corrigir cesto</h5>
+      <button class="modal-x" onclick="fecharCorrigir()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="modal-body" style="padding:22px 20px;">
+      <label class="label">Número correto do cesto</label>
+      <input type="text" id="corrigirNumero" class="input" inputmode="numeric" pattern="[0-9]*" style="margin-bottom:6px;">
+      <p class="hint" id="corrigirMsg" style="margin:0;color:var(--red);"></p>
+    </div>
+    <div class="modal-foot" style="flex-wrap:wrap;gap:8px;">
+      <button class="btn btn-danger btn-sm" onclick="cancelarCesto()" style="flex:0 0 auto;"><i class="bi bi-trash"></i>Cancelar cesto</button>
+      <div style="flex:1;"></div>
+      <button class="btn btn-ghost" onclick="fecharCorrigir()" style="flex:0 0 auto;">Voltar</button>
+      <button class="btn btn-primary" onclick="salvarNumero()" style="flex:0 0 auto;"><i class="bi bi-check-lg"></i>Salvar</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 function fmtTempo(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),x=s%60;const mm=String(m).padStart(2,'0'),xx=String(x).padStart(2,'0');return h>0?`${h}:${mm}:${xx}`:`${mm}:${xx}`;}
 
+// sincroniza com a hora do servidor (cronômetro começa do 0:00)
+let _offset=0;
+async function sincronizar(){try{const t0=Date.now();const j=await (await fetch('/api/agora')).json();const t1=Date.now();_offset=new Date(j.agora_iso).getTime()+(t1-t0)/2-t1;}catch(_){_offset=0;}}
+function agora(){return Date.now()+_offset;}
+function segDe(iso){return iso?Math.max(0,Math.floor((agora()-new Date(iso).getTime())/1000)):0;}
+
 async function carregar(){
-  const r=await fetch('/api/banho/fila'); const j=await r.json(); const agora=Date.now();
+  const r=await fetch('/api/banho/fila'); const j=await r.json();
   const eb=document.getElementById('emBanho');
   eb.innerHTML=j.em_banho.length?j.em_banho.map(c=>{
-    const seg=c.banho_inicio_iso?Math.max(0,Math.floor((agora-new Date(c.banho_inicio_iso).getTime())/1000)):0;
     return `<div class="flow-card live">
       <div class="flow-left">
         <div class="cesto-badge">${c.numero_cesto}</div>
         <div class="flow-info">
           <div class="top">${c.processo||'Sem processo'} <span class="pill ${c.tipo==='Retrabalho'?'pill-retrab':'pill-normal'}">${c.tipo}</span></div>
           <div class="ln">${c.n_itens>1?('<strong>'+c.n_itens+' OPs</strong>'):('OP <strong>'+(c.ordem||'—')+'</strong>')} · ${c.qtd_total||0} pç</div>
-          <div class="cron cron-banho cron-el" data-ini="${c.banho_inicio_iso}">${fmtTempo(seg)}</div>
+          <div class="cron cron-banho cron-el" data-ini="${c.banho_inicio_iso}">${fmtTempo(segDe(c.banho_inicio_iso))}</div>
         </div>
       </div>
       <button class="btn btn-stop btn-sm" onclick="finalizar(${c.id})"><i class="bi bi-stop-circle-fill"></i>Sair do banho</button>
@@ -43,19 +69,50 @@ async function carregar(){
         <span class="fila-pos">${i+1}</span>
         <div class="cesto-badge">${c.numero_cesto}</div>
         <div class="flow-info">
-          <div class="top">${c.processo||'Sem processo'}</div>
+          <div class="top">${c.processo||'Sem processo'} <span class="pill ${c.tipo==='Retrabalho'?'pill-retrab':'pill-normal'}">${c.tipo}</span></div>
           <div class="ln">${c.n_itens>1?('<strong>'+c.n_itens+' OPs</strong> · '+(c.texto_breve||'')):('OP <strong>'+(c.ordem||'—')+'</strong> · '+(c.texto_breve||''))}</div>
           <div class="ln">${c.qtd_total||0} peças · prep ${c.prep_minutos} min</div>
+          <div class="ln muted" style="font-size:12px;">esperando: <span class="cron-el" data-ini="${c.prep_fim_iso}" style="font-weight:700;color:var(--violet,#7C5CFC);">${fmtTempo(segDe(c.prep_fim_iso))}</span></div>
         </div>
       </div>
-      <button class="btn btn-aqua btn-sm" onclick="iniciar(${c.id})"><i class="bi bi-play-fill"></i>Iniciar banho</button>
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
+        <button class="btn btn-aqua btn-sm" onclick="iniciar(${c.id})"><i class="bi bi-play-fill"></i>Iniciar banho</button>
+        <button class="btn btn-ghost btn-sm" onclick="abrirCorrigir(${c.id},${c.numero_cesto})" style="font-size:.76rem;"><i class="bi bi-pencil"></i>Corrigir</button>
+      </div>
     </div>`).join(''):'<div class="empty panel"><i class="bi bi-inbox"></i>Fila vazia.</div>';
 }
-function tick(){const a=Date.now();document.querySelectorAll('.cron-el[data-ini]').forEach(e=>{e.textContent=fmtTempo(Math.max(0,Math.floor((a-new Date(e.dataset.ini).getTime())/1000)));});}
+function tick(){document.querySelectorAll('.cron-el[data-ini]').forEach(e=>{if(e.dataset.ini)e.textContent=fmtTempo(segDe(e.dataset.ini));});}
 
 async function iniciar(id){await fetch('/api/banho/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});carregar();}
 async function finalizar(id){if(!confirm('Confirmar saída do banho?'))return;await fetch('/api/banho/finalizar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});carregar();}
 
-carregar();setInterval(carregar,4000);setInterval(tick,1000);
+// corrigir / cancelar cesto
+let _corrigirId=null;
+function abrirCorrigir(id,numero){
+  _corrigirId=id;
+  document.getElementById('corrigirNumero').value=numero;
+  document.getElementById('corrigirMsg').textContent='';
+  document.getElementById('modalCorrigir').classList.add('open');
+}
+function fecharCorrigir(){document.getElementById('modalCorrigir').classList.remove('open');_corrigirId=null;}
+async function salvarNumero(){
+  const novo=document.getElementById('corrigirNumero').value;
+  const msg=document.getElementById('corrigirMsg');
+  try{
+    const d=await (await fetch('/api/cesto/mudar_numero',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:_corrigirId,numero_cesto:novo})})).json();
+    if(d.sucesso){fecharCorrigir();carregar();}else{msg.textContent=d.erro||'Não foi possível alterar.';}
+  }catch(e){msg.textContent='Erro ao salvar.';}
+}
+async function cancelarCesto(){
+  if(!confirm('Tem certeza que deseja CANCELAR este cesto? Ele será removido.'))return;
+  const msg=document.getElementById('corrigirMsg');
+  try{
+    const d=await (await fetch('/api/cesto/cancelar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:_corrigirId})})).json();
+    if(d.sucesso){fecharCorrigir();carregar();}else{msg.textContent=d.erro||'Não foi possível cancelar.';}
+  }catch(e){msg.textContent='Erro ao cancelar.';}
+}
+
+sincronizar().then(()=>{carregar();setInterval(carregar,4000);setInterval(tick,1000);});
+setInterval(sincronizar,60000);
 </script>
 {% endblock %}

@@ -5,39 +5,117 @@
   <div class="section-head"><div class="section-title"><i class="bi bi-table"></i>Lista mestra (relatório SAP)</div></div>
   {% if msg %}<div class="alert alert-info"><i class="bi bi-info-circle-fill"></i>{{ msg }}</div>{% endif %}
 
+  <!-- Segurança e backup dos dados -->
   <div class="panel panel-pad" style="margin-bottom:20px;">
-    <div class="section-title" style="font-size:1rem;margin-bottom:10px;"><i class="bi bi-cloud-arrow-up"></i>Importar relatório</div>
-    <p class="small muted" style="margin-bottom:16px;">
-      Exporte o relatório do SAP em <strong>.xlsx</strong> ou <strong>.csv/.txt</strong> (separado por TAB).
-      O sistema lê as colunas: <code>Ordem</code>, <code>Material</code>, <code>Texto breve material</code> e <code>Quantidade total</code>.
-      Ordens já cadastradas são atualizadas; novas são adicionadas. Ao bipar a OP na tela de preparação, esses dados são preenchidos automaticamente.
+    <div class="section-title" style="font-size:1rem;margin-bottom:12px;"><i class="bi bi-shield-check"></i>Segurança dos dados</div>
+    <div id="dbStatusBox" style="padding:14px 16px;border-radius:8px;border:1px solid var(--line);margin-bottom:14px;">
+      <span class="small muted">Verificando banco de dados…</span>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <a href="/api/admin/backup" class="btn btn-primary"><i class="bi bi-download"></i>Baixar backup (JSON)</a>
+      <label class="btn btn-ghost" style="cursor:pointer;margin:0;">
+        <i class="bi bi-upload"></i>Importar backup
+        <input type="file" id="fileRestaurar" accept=".json" style="display:none;" onchange="restaurarBackup(this)">
+      </label>
+      <span id="restaurarMsg" class="small muted"></span>
+    </div>
+    <p class="small muted" style="margin:12px 0 0;">
+      O backup salva todos os cestos, usuários e a lista mestra num arquivo no seu computador. A importação <strong>só adiciona</strong> o que não existe — nunca apaga nada. Faça backup antes de qualquer mudança grande.
     </p>
-    <form method="POST" enctype="multipart/form-data">
-      <div style="display:flex;gap:10px;flex-wrap:wrap;">
-        <input type="file" class="input input-sm" name="arquivo" accept=".xlsx,.csv,.txt" required style="flex:1;min-width:200px;">
-        <button class="btn btn-primary" type="submit"><i class="bi bi-upload"></i>Importar</button>
+  </div>
+
+  <div class="panel panel-pad" style="margin-bottom:20px;">
+    <div class="section-title" style="font-size:1rem;margin-bottom:10px;"><i class="bi bi-file-earmark-spreadsheet"></i>Arquivos em uso (do GitHub)</div>
+    <p class="small muted" style="margin-bottom:16px;">
+      A lista mestra e o peso/área são carregados <strong>direto dos arquivos</strong> no repositório ao iniciar o servidor.
+      Para atualizar: substitua <code>lista_mestra.xlsx</code> e/ou <code>area_peso.xlsx</code> na raiz do projeto no GitHub, faça commit e o Railway redeploya. Os dados de produção (cestos) não são afetados.
+    </p>
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:14px 16px;background:var(--bg);border-radius:8px;border:1px solid var(--line);">
+      <div>
+        <span class="small muted">Lista mestra:</span><br><strong>{{ arquivo_info }}</strong>
       </div>
-    </form>
+      <div>
+        {% if status.carregada %}
+          <span class="pill pill-banho"><i class="bi bi-check-circle-fill"></i> {{ total_itens }} ordens</span>
+        {% else %}
+          <span class="pill pill-retrab"><i class="bi bi-exclamation-triangle-fill"></i> {{ status.erro }}</span>
+        {% endif %}
+      </div>
+      <div>
+        <span class="small muted">Peso/Área:</span><br><strong>{{ areapeso_arquivo }}</strong>
+      </div>
+      <div>
+        {% if areapeso_status.carregada %}
+          <span class="pill pill-banho"><i class="bi bi-check-circle-fill"></i> {{ areapeso_status.total }} códigos</span>
+        {% else %}
+          <span class="pill pill-retrab"><i class="bi bi-exclamation-triangle-fill"></i> {{ areapeso_status.erro }}</span>
+        {% endif %}
+      </div>
+      <form method="POST" style="margin-left:auto;">
+        <input type="hidden" name="acao" value="recarregar">
+        <button class="btn btn-primary" type="submit"><i class="bi bi-arrow-clockwise"></i>Recarregar da memória</button>
+      </form>
+    </div>
   </div>
 
   <div class="panel" style="overflow:hidden;">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--line);">
-      <span class="section-title" style="font-size:1rem;">Ordens cadastradas</span>
+      <span class="section-title" style="font-size:1rem;">Ordens na lista mestra</span>
       <span class="pill pill-banho">{{ total_itens }} ordens</span>
     </div>
     <div class="table-wrap">
       <table class="tbl">
-        <thead><tr><th>Ordem (OP)</th><th>Material (código)</th><th>Texto breve</th><th>Qtd total</th></tr></thead>
+        <thead><tr><th>Ordem (OP)</th><th>Material (código)</th><th>Texto breve</th><th>Qtd</th></tr></thead>
         <tbody>
           {% for i in amostra %}
           <tr><td><strong>{{ i.ordem }}</strong></td><td>{{ i.material }}</td><td><span class="small">{{ i.texto_breve }}</span></td><td class="mono">{{ i.quantidade }}</td></tr>
           {% else %}
-          <tr><td colspan="4" class="empty"><i class="bi bi-inbox"></i>Nenhuma ordem importada ainda.</td></tr>
+          <tr><td colspan="4" class="empty"><i class="bi bi-inbox"></i>Nenhuma ordem carregada. Verifique o arquivo no GitHub.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
-    {% if total_itens > amostra|length %}<p class="small muted" style="padding:12px 20px;margin:0;">Mostrando {{ amostra|length }} de {{ total_itens }} ordens.</p>{% endif %}
+    {% if total_itens > amostra|length %}<p class="small muted" style="padding:12px 20px;margin:0;">Mostrando {{ amostra|length }} de {{ total_itens }} ordens em memória.</p>{% endif %}
   </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function carregarDbStatus(){
+  const box=document.getElementById('dbStatusBox');
+  try{
+    const d=await (await fetch('/api/admin/db_status')).json();
+    if(d.seguro){
+      box.style.background='rgba(43,164,92,.10)';box.style.borderColor='#2BA45C';
+      box.innerHTML='<div style="display:flex;align-items:center;gap:10px;">'+
+        '<i class="bi bi-shield-fill-check" style="color:#2BA45C;font-size:1.4rem;"></i>'+
+        '<div><strong style="color:#1E9E57;">PostgreSQL conectado — dados seguros</strong><br>'+
+        '<span class="small muted">'+d.cards+' cestos, '+d.usuarios+' usuários e '+d.mestre+' ordens no banco permanente. Alterar o GitHub não apaga seus dados.</span></div></div>';
+    }else{
+      box.style.background='rgba(214,71,63,.10)';box.style.borderColor='#D6473F';
+      box.innerHTML='<div style="display:flex;align-items:center;gap:10px;">'+
+        '<i class="bi bi-exclamation-triangle-fill" style="color:#D6473F;font-size:1.4rem;"></i>'+
+        '<div><strong style="color:#A8322B;">ATENÇÃO: banco temporário (SQLite)!</strong><br>'+
+        '<span class="small muted">Os dados se perdem no próximo deploy. No Railway, no serviço <strong>web</strong>, adicione a variável <code>DATABASE_URL = </code><code>{% raw %}${{Postgres.DATABASE_URL}}{% endraw %}</code>.</span></div></div>';
+    }
+  }catch(e){box.innerHTML='<span class="small muted">Não foi possível verificar o banco.</span>';}
+}
+async function restaurarBackup(input){
+  if(!input.files||!input.files[0])return;
+  const msg=document.getElementById('restaurarMsg');
+  msg.textContent='Importando…';msg.style.color='';
+  const fd=new FormData();fd.append('arquivo',input.files[0]);
+  try{
+    const d=await (await fetch('/api/admin/restaurar',{method:'POST',body:fd})).json();
+    if(d.sucesso){
+      msg.style.color='#1E9E57';
+      msg.textContent=`Importado: ${d.cards} cestos, ${d.usuarios} usuários, ${d.mestre} ordens.`;
+      carregarDbStatus();
+    }else{msg.style.color='#D6473F';msg.textContent='Erro: '+(d.erro||'falhou');}
+  }catch(e){msg.style.color='#D6473F';msg.textContent='Erro ao importar.';}
+  input.value='';
+}
+carregarDbStatus();
+</script>
 {% endblock %}

@@ -17,6 +17,7 @@ import os
 import io
 import csv
 import json
+import threading
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -44,6 +45,9 @@ Session = scoped_session(sessionmaker(bind=engine))
 Base = declarative_base()
 
 TOTAL_CESTOS = 19
+
+# Senha de acesso ao painel público (gerência). Pode trocar por variável de ambiente.
+SENHA_PAINEL = os.environ.get('SENHA_PAINEL', 'Decio2026@')
 
 PROCESSOS = [
     "AÇO SEM OXIDAÇÃO", "AÇO COM OXIDAÇÃO", "ALUMÍNIO",
@@ -136,6 +140,14 @@ class Card(Base):
             itens = [{'ordem': self.ordem, 'material': self.material,
                       'texto_breve': self.texto_breve, 'quantidade': self.quantidade}]
         qtd_total = sum(int(i.get('quantidade') or 0) for i in itens) if itens else (self.quantidade or 0)
+        # peso e área totais = soma do unitário (por código SAP) × quantidade de cada item
+        peso_total = 0.0
+        area_total = 0.0
+        for it in itens:
+            a_unit, p_unit = _area_peso_do_codigo(it.get('material', ''))
+            q = int(it.get('quantidade') or 0)
+            area_total += a_unit * q
+            peso_total += p_unit * q
         return {
             'id': self.id, 'estado': self.estado,
             'numero_cesto': self.numero_cesto,
@@ -143,6 +155,7 @@ class Card(Base):
             'ordem': self.ordem, 'material': self.material,
             'texto_breve': self.texto_breve, 'quantidade': self.quantidade,
             'itens': itens, 'qtd_total': qtd_total, 'n_itens': len(itens),
+            'peso_total': round(peso_total, 2), 'area_total': round(area_total, 3),
             'observacao': self.observacao or '',
             'operador_prep': self.operador_prep, 'operador_prep2': self.operador_prep2 or '',
             'n_operadores': self.n_operadores or 1,
@@ -152,6 +165,7 @@ class Card(Base):
             'banho_inicio': fmt(self.banho_inicio), 'banho_fim': fmt(self.banho_fim),
             'banho_minutos': round(self.banho_minutos or 0, 1),
             'prep_inicio_iso': iso(self.prep_inicio),
+            'prep_fim_iso': iso(self.prep_fim),
             'banho_inicio_iso': iso(self.banho_inicio),
             'pausado': bool(self.pausado),
             'pausa_inicio_iso': iso(self.pausa_inicio),
@@ -222,11 +236,207 @@ def _norm_ordem(v):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Páginas
+# Lista mestra do SAP e Área/Peso — carregados de arquivos do GitHub p/ memória
+# (sem banco: troque o .xlsx no GitHub e dê redeploy para atualizar)
 # ─────────────────────────────────────────────────────────────────────────────
-@app.route('/')
-def index():
-    return redirect(url_for('login'))
+_lista_lock = threading.Lock()
+_lista_por_ordem = {}
+_lista_por_material = {}
+_lista_status = {'carregada': False, 'total': 0, 'erro': None}
+
+LISTA_MESTRA_ARQUIVOS = ['lista_mestra.xlsx', 'lista_mestra.csv', 'lista_mestra.txt',
+                         'exemplo_lista_mestra_sap.txt']
+AREA_PESO_ARQUIVOS = ['area_peso.xlsx', 'area_peso.csv', 'area_peso.txt']
+
+_areapeso_por_sap = {}
+_areapeso_status = {'carregada': False, 'total': 0, 'erro': None}
+
+
+def _norm_str(v):
+    if v is None:
+        return ''
+    s = str(v).strip()
+    if s.endswith('.0'):
+        s = s[:-2]
+    return s
+
+
+def _achar_arquivo(lista_nomes):
+    base = os.path.dirname(os.path.abspath(__file__))
+    for nome in lista_nomes:
+        caminho = os.path.join(base, nome)
+        if os.path.isfile(caminho):
+            return caminho
+    return None
+
+
+def _achar_colunas(linhas):
+    """Detecta as colunas da lista mestra pelo nome no cabeçalho."""
+    def norm(s):
+        return str(s).strip().lower() if s is not None else ''
+    for i, row in enumerate(linhas[:10]):
+        if not row:
+            continue
+        nomes = [norm(c) for c in row]
+        idx = {}
+        for j, nome in enumerate(nomes):
+            if nome == 'ordem' and 'ordem' not in idx:
+                idx['ordem'] = j
+            elif nome == 'material' and 'material' not in idx:
+                idx['material'] = j
+            elif 'texto breve' in nome and 'texto' not in idx:
+                idx['texto'] = j
+            elif ('quantidade da ordem' in nome or nome == 'quantidade total'
+                  or nome == 'quantidade') and 'qtd' not in idx:
+                idx['qtd'] = j
+        if 'ordem' in idx and 'material' in idx:
+            return i, idx
+    return None
+
+
+def _parsear_linhas_mestre(linhas):
+    achado = _achar_colunas(linhas)
+    if achado:
+        cab_idx, col = achado
+        i_ordem = col.get('ordem', 0)
+        i_mat = col.get('material', 1)
+        i_texto = col.get('texto')
+        i_qtd = col.get('qtd')
+        inicio = cab_idx + 1
+    else:
+        i_ordem, i_mat, i_texto, i_qtd = 0, 2, 3, 4
+        inicio = 0
+
+    def val(row, idx):
+        if idx is None or idx >= len(row) or row[idx] is None:
+            return ''
+        return str(row[idx]).strip()
+
+    por_ordem, por_material = {}, {}
+    for row in linhas[inicio:]:
+        if not row or all(c is None or str(c).strip() == '' for c in row):
+            continue
+        ordem = _norm_ordem(row[i_ordem]) if i_ordem < len(row) and row[i_ordem] is not None else ''
+        if not ordem or not ordem.replace('.', '').isdigit():
+            continue
+        material = val(row, i_mat)
+        texto = val(row, i_texto)
+        q = val(row, i_qtd)
+        try:
+            qtd = int(float(q)) if q else 0
+        except (ValueError, TypeError):
+            qtd = 0
+        item = {'ordem': ordem, 'material': material, 'texto_breve': texto, 'quantidade': qtd}
+        por_ordem[ordem] = item
+        if material and material not in por_material:
+            por_material[material] = item
+    return por_ordem, por_material
+
+
+def _ler_planilha(caminho):
+    """Lê xlsx/csv/txt e devolve lista de linhas (cada linha = lista de células)."""
+    linhas = []
+    nome = caminho.lower()
+    if nome.endswith('.csv') or nome.endswith('.txt'):
+        with open(caminho, encoding='utf-8-sig', errors='replace') as f:
+            raw = f.read()
+        sep = '\t' if raw.count('\t') > raw.count(';') and raw.count('\t') > raw.count(',') \
+            else (';' if raw.count(';') > raw.count(',') else ',')
+        linhas = list(csv.reader(io.StringIO(raw), delimiter=sep))
+    else:
+        wb = load_workbook(caminho, read_only=True, data_only=True)
+        ws = wb.active
+        for row in ws.iter_rows(values_only=True):
+            linhas.append(list(row))
+    return linhas
+
+
+def carregar_lista_mestre():
+    global _lista_por_ordem, _lista_por_material, _lista_status
+    caminho = _achar_arquivo(LISTA_MESTRA_ARQUIVOS)
+    if not caminho:
+        with _lista_lock:
+            _lista_status = {'carregada': False, 'total': 0,
+                             'erro': 'lista_mestra.xlsx não encontrada na raiz do projeto.'}
+        print('[lista_mestra] AVISO: nenhum arquivo encontrado.')
+        return
+    try:
+        linhas = _ler_planilha(caminho)
+        por_ordem, por_material = _parsear_linhas_mestre(linhas)
+        with _lista_lock:
+            _lista_por_ordem = por_ordem
+            _lista_por_material = por_material
+            _lista_status = {'carregada': True, 'total': len(por_ordem), 'erro': None}
+        print(f'[lista_mestra] Carregada: {len(por_ordem)} ordens de "{os.path.basename(caminho)}".')
+    except Exception as e:
+        with _lista_lock:
+            _lista_status = {'carregada': False, 'total': 0, 'erro': str(e)}
+        print(f'[lista_mestra] ERRO: {e}')
+
+
+def carregar_area_peso():
+    """Carrega area_peso (Código SAP -> área m² e peso kg unitários)."""
+    global _areapeso_por_sap, _areapeso_status
+    caminho = _achar_arquivo(AREA_PESO_ARQUIVOS)
+    if not caminho:
+        _areapeso_status = {'carregada': False, 'total': 0, 'erro': 'area_peso não encontrado.'}
+        print('[area_peso] AVISO: nenhum arquivo encontrado.')
+        return
+    try:
+        linhas = _ler_planilha(caminho)
+
+        def norm(s):
+            return str(s).strip().lower() if s is not None else ''
+        i_sap = i_area = i_peso = None
+        inicio = 0
+        for i, row in enumerate(linhas[:10]):
+            if not row:
+                continue
+            for j, c in enumerate(row):
+                n = norm(c)
+                if 'codigo sap' in n or 'código sap' in n:
+                    i_sap = j
+                elif 'area' in n or 'área' in n:
+                    i_area = j
+                elif 'peso' in n:
+                    i_peso = j
+            if i_sap is not None:
+                inicio = i + 1
+                break
+        if i_sap is None:
+            i_sap, i_area, i_peso, inicio = 3, 1, 2, 1
+
+        mapa = {}
+        for row in linhas[inicio:]:
+            if not row or all(c is None or str(c).strip() == '' for c in row):
+                continue
+            sap = _norm_str(row[i_sap]) if i_sap is not None and i_sap < len(row) else ''
+            if not sap:
+                continue
+
+            def num(idx):
+                try:
+                    return float(row[idx]) if idx is not None and idx < len(row) and row[idx] not in (None, '') else 0.0
+                except (ValueError, TypeError):
+                    return 0.0
+            mapa[sap] = {'area_m2': num(i_area) / 1_000_000.0, 'peso_kg': num(i_peso)}
+        _areapeso_por_sap = mapa
+        _areapeso_status = {'carregada': True, 'total': len(mapa), 'erro': None}
+        print(f'[area_peso] Carregada: {len(mapa)} códigos de "{os.path.basename(caminho)}".')
+    except Exception as e:
+        _areapeso_status = {'carregada': False, 'total': 0, 'erro': str(e)}
+        print(f'[area_peso] ERRO: {e}')
+
+
+def _area_peso_do_codigo(material):
+    """Retorna (area_m2, peso_kg) unitários para um código SAP, ou (0,0)."""
+    d = _areapeso_por_sap.get(_norm_str(material))
+    if d:
+        return d['area_m2'], d['peso_kg']
+    return 0.0, 0.0
+
+
+
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -287,8 +497,16 @@ def dashboard():
     return render_template('dashboard.html', nome=session.get('nome'), processos=PROCESSOS)
 
 
-@app.route('/painel')
+@app.route('/painel', methods=['GET', 'POST'])
 def painel_publico():
+    # Painel público protegido por senha simples (compartilhada com a gerência)
+    if request.method == 'POST':
+        if request.form.get('senha', '') == SENHA_PAINEL:
+            session['painel_ok'] = True
+            return redirect(url_for('painel_publico'))
+        return render_template('painel_senha.html', erro='Senha incorreta.')
+    if not session.get('painel_ok'):
+        return render_template('painel_senha.html', erro=None)
     return render_template('painel.html', processos=PROCESSOS)
 
 
@@ -334,9 +552,35 @@ def admin_usuarios():
 @app.route('/admin/mestre', methods=['GET', 'POST'])
 @login_required('admin')
 def admin_mestre():
+    msg = None
+    # Botão "Recarregar da memória": relê os arquivos do projeto
+    if request.method == 'POST' and request.form.get('acao') == 'recarregar':
+        carregar_lista_mestre()
+        carregar_area_peso()
+        msg = 'Lista mestra e área/peso recarregadas dos arquivos.'
+
+    with _lista_lock:
+        status = dict(_lista_status)
+        amostra = list(_lista_por_ordem.values())[:25]
+        total = status.get('total', 0)
+    arquivo_lista = os.path.basename(_achar_arquivo(LISTA_MESTRA_ARQUIVOS) or '') or 'não encontrado'
+    arquivo_ap = os.path.basename(_achar_arquivo(AREA_PESO_ARQUIVOS) or '') or 'não encontrado'
+    return render_template('mestre.html', nome=session.get('nome'),
+                           msg=msg, total_itens=total, amostra=amostra,
+                           status=status, arquivo_info=arquivo_lista,
+                           areapeso_status=_areapeso_status, areapeso_arquivo=arquivo_ap)
+
+
+def _admin_mestre_antigo_desativado():
     db = Session()
     msg = None
     try:
+        # Garante que a tabela exista (deploy sobre banco antigo pode não tê-la)
+        try:
+            Base.metadata.create_all(engine)
+        except Exception:
+            pass
+
         if request.method == 'POST':
             f = request.files.get('arquivo')
             if f and f.filename:
@@ -356,11 +600,115 @@ def admin_mestre():
                     novos, atual = importar_mestre(db, linhas)
                     msg = f'Importado: {novos} novas ordens, {atual} atualizadas.'
                 except Exception as e:
+                    db.rollback()
                     msg = f'Erro ao importar: {e}'
-        total = db.query(ItemMestre).count()
-        amostra = [i.to_dict() for i in db.query(ItemMestre).limit(25).all()]
+        try:
+            total = db.query(ItemMestre).count()
+            amostra = [i.to_dict() for i in db.query(ItemMestre).limit(25).all()]
+        except Exception as e:
+            db.rollback()
+            total, amostra = 0, []
+            if not msg:
+                msg = f'Banco em preparação ({e}). Tente importar o relatório.'
         return render_template('mestre.html', nome=session.get('nome'),
                                msg=msg, total_itens=total, amostra=amostra)
+    finally:
+        db.close()
+
+
+def _serial_val(v):
+    if isinstance(v, datetime):
+        return v.isoformat() + 'Z'
+    return v
+
+
+@app.route('/api/admin/db_status')
+@login_required('admin')
+def api_db_status():
+    """Mostra se o banco é PostgreSQL (seguro) ou SQLite (temporário)."""
+    tipo = 'postgresql' if DATABASE_URL.startswith('postgresql') else 'sqlite'
+    db = Session()
+    try:
+        n_cards = db.query(Card).count()
+        n_users = db.query(Usuario).count()
+        n_mestre = db.query(ItemMestre).count()
+    except Exception:
+        n_cards = n_users = n_mestre = -1
+    finally:
+        db.close()
+    return jsonify({'tipo': tipo, 'seguro': tipo == 'postgresql',
+                    'cards': n_cards, 'usuarios': n_users, 'mestre': n_mestre})
+
+
+@app.route('/api/admin/backup')
+@login_required('admin')
+def api_admin_backup():
+    """Baixa backup completo (cards, usuários e lista mestra) em JSON."""
+    db = Session()
+    try:
+        def full(obj, model):
+            return {c.name: _serial_val(getattr(obj, c.name)) for c in model.__table__.columns}
+        dados = {
+            'versao': 1,
+            'gerado_em': datetime.utcnow().isoformat() + 'Z',
+            'cards': [full(c, Card) for c in db.query(Card).all()],
+            'usuarios': [full(u, Usuario) for u in db.query(Usuario).all()],
+            'itens_mestre': [full(i, ItemMestre) for i in db.query(ItemMestre).all()],
+        }
+        buf = io.BytesIO(json.dumps(dados, ensure_ascii=False, indent=2).encode('utf-8'))
+        buf.seek(0)
+        stamp = datetime.now().strftime('%Y%m%d_%H%M')
+        return send_file(buf, as_attachment=True,
+                         download_name=f'backup_banho_{stamp}.json',
+                         mimetype='application/json')
+    finally:
+        db.close()
+
+
+@app.route('/api/admin/restaurar', methods=['POST'])
+@login_required('admin')
+def api_admin_restaurar():
+    """Restaura backup JSON. Só ADICIONA o que não existe — nunca apaga."""
+    f = request.files.get('arquivo')
+    if not f or not f.filename:
+        return jsonify({'sucesso': False, 'erro': 'Envie o arquivo de backup.'}), 400
+    try:
+        dados = json.loads(f.stream.read().decode('utf-8-sig', errors='replace'))
+    except Exception as e:
+        return jsonify({'sucesso': False, 'erro': f'Arquivo inválido: {e}'}), 400
+    db = Session()
+    rc = ru = rm = 0
+    try:
+        def set_cols(obj, model, src):
+            for col in model.__table__.columns:
+                if col.name in src:
+                    val = src[col.name]
+                    if isinstance(col.type, DateTime) and val:
+                        try:
+                            val = datetime.fromisoformat(str(val).replace('Z', ''))
+                        except (ValueError, TypeError):
+                            val = None
+                    setattr(obj, col.name, val)
+
+        logins = {u.login for u in db.query(Usuario).all()}
+        for u in dados.get('usuarios', []):
+            if u.get('login') and u['login'] not in logins:
+                novo = Usuario(login=u['login'], nome=u.get('nome', ''),
+                               senha_hash=u.get('senha_hash', ''), perfil=u.get('perfil', 'prep'))
+                db.add(novo); ru += 1
+        ids = {c.id for c in db.query(Card.id).all()}
+        for cd in dados.get('cards', []):
+            if cd.get('id') and cd['id'] not in ids:
+                novo = Card(); set_cols(novo, Card, cd); db.add(novo); rc += 1
+        ordens = {i.ordem for i in db.query(ItemMestre).all()}
+        for it in dados.get('itens_mestre', []):
+            if it.get('ordem') and it['ordem'] not in ordens:
+                novo = ItemMestre(); set_cols(novo, ItemMestre, it); db.add(novo); rm += 1
+        db.commit()
+        return jsonify({'sucesso': True, 'cards': rc, 'usuarios': ru, 'mestre': rm})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'sucesso': False, 'erro': str(e)}), 500
     finally:
         db.close()
 
@@ -439,14 +787,25 @@ def api_cestos():
 @app.route('/api/buscar_ordem/<path:ordem>')
 @login_required('prep', 'banho')
 def api_buscar_ordem(ordem):
-    db = Session()
-    try:
-        item = db.query(ItemMestre).filter_by(ordem=_norm_ordem(ordem)).first()
-        if item:
-            return jsonify({'encontrado': True, **item.to_dict()})
-        return jsonify({'encontrado': False, 'ordem': _norm_ordem(ordem)})
-    finally:
-        db.close()
+    o = _norm_ordem(ordem)
+    with _lista_lock:
+        item = _lista_por_ordem.get(o)
+    if item:
+        return jsonify({'encontrado': True, **item})
+    return jsonify({'encontrado': False, 'ordem': o})
+
+
+@app.route('/api/buscar_codigo/<path:codigo>')
+@login_required('prep', 'banho')
+def api_buscar_codigo(codigo):
+    """Busca a descrição de um item pelo código (Material), quando não há OP."""
+    cod = _norm_str(codigo)
+    with _lista_lock:
+        item = _lista_por_material.get(cod)
+    if item:
+        return jsonify({'encontrado': True, 'material': cod,
+                        'texto_breve': item.get('texto_breve', '')})
+    return jsonify({'encontrado': False, 'material': cod})
 
 
 @app.route('/api/prep/iniciar', methods=['POST'])
@@ -669,6 +1028,59 @@ def api_banho_finalizar():
         db.close()
 
 
+@app.route('/api/agora')
+def api_agora():
+    """Hora do servidor (UTC) p/ sincronizar cronômetros e começar do 0:00."""
+    return jsonify({'agora_iso': datetime.utcnow().isoformat() + 'Z'})
+
+
+@app.route('/api/cesto/mudar_numero', methods=['POST'])
+@login_required('prep', 'banho')
+def api_cesto_mudar_numero():
+    """Corrige o número de um cesto cadastrado errado."""
+    d = request.json or {}
+    db = Session()
+    try:
+        card = db.query(Card).get(int(d.get('id', 0)))
+        if not card:
+            return jsonify({'sucesso': False, 'erro': 'Cesto não encontrado.'}), 404
+        try:
+            novo = int(d.get('numero_cesto'))
+        except (ValueError, TypeError):
+            return jsonify({'sucesso': False, 'erro': 'Número inválido.'}), 400
+        if not (1 <= novo <= TOTAL_CESTOS):
+            return jsonify({'sucesso': False, 'erro': f'O número deve ser entre 1 e {TOTAL_CESTOS}.'}), 400
+        ocupado = db.query(Card).filter(Card.numero_cesto == novo,
+                                        Card.estado.in_(ESTADOS_ATIVOS),
+                                        Card.id != card.id).first()
+        if ocupado:
+            return jsonify({'sucesso': False, 'erro': f'O cesto {novo} já está em uso.'}), 400
+        card.numero_cesto = novo
+        db.commit()
+        return jsonify({'sucesso': True})
+    finally:
+        db.close()
+
+
+@app.route('/api/cesto/cancelar', methods=['POST'])
+@login_required('prep', 'banho')
+def api_cesto_cancelar():
+    """Cancela (remove) um cesto cadastrado errado. Não cancela concluído."""
+    d = request.json or {}
+    db = Session()
+    try:
+        card = db.query(Card).get(int(d.get('id', 0)))
+        if not card:
+            return jsonify({'sucesso': False, 'erro': 'Cesto não encontrado.'}), 404
+        if card.estado == ST_CONCLUIDO:
+            return jsonify({'sucesso': False, 'erro': 'Não é possível cancelar um cesto concluído.'}), 400
+        db.delete(card)
+        db.commit()
+        return jsonify({'sucesso': True})
+    finally:
+        db.close()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Dados dos dashboards
 # ─────────────────────────────────────────────────────────────────────────────
@@ -693,17 +1105,27 @@ def _coletar_dados(de=None, ate=None):
         tp = [c.prep_minutos for c in cards if c.prep_minutos]
         tb = [c.banho_minutos for c in cards if c.banho_minutos]
         por_proc, por_dia = {}, {}
+        peso_total_geral = 0.0
+        area_total_geral = 0.0
+        pecas_total_geral = 0
         for c in cards:
             p = c.processo or 'Sem processo'
             por_proc[p] = por_proc.get(p, 0) + 1
             dia = (c.banho_fim - timedelta(hours=3)).strftime('%d/%m')
             por_dia[dia] = por_dia.get(dia, 0) + 1
+            dd = c.to_dict()
+            peso_total_geral += dd['peso_total']
+            area_total_geral += dd['area_total']
+            pecas_total_geral += dd['qtd_total']
         return {
             'total': len(cards), 'normais': normais, 'retrabalhos': retrab,
             'em_andamento': len(ativos),
             'media_prep': round(sum(tp) / len(tp), 1) if tp else 0,
             'media_banho': round(sum(tb) / len(tb), 1) if tb else 0,
             'por_processo': por_proc, 'por_dia': por_dia,
+            'peso_total_geral': round(peso_total_geral, 1),
+            'area_total_geral': round(area_total_geral, 2),
+            'pecas_total_geral': pecas_total_geral,
             'ativos': [c.to_dict() for c in ativos],
             'registros': [c.to_dict() for c in sorted(cards, key=lambda x: x.id, reverse=True)[:200]],
         }
@@ -758,29 +1180,37 @@ def _gerar_excel(tipo):
         if tipo == 'prebanho':
             ws.title = 'Pre-Banho'
             headers = ['ID', 'Cesto', 'OP (Ordem)', 'Código', 'Texto breve', 'Qtd',
+                       'Área (m²)', 'Peso (kg)',
                        'Processo', 'Tipo', 'Operador 1', 'Operador 2', 'Nº oper.',
                        'Início', 'Fim', 'Tempo prep (min)', 'Observação']
-            larg = [6, 7, 14, 14, 30, 7, 22, 12, 16, 16, 9, 19, 19, 13, 28]
+            larg = [6, 7, 14, 14, 30, 7, 12, 12, 22, 12, 16, 16, 9, 19, 19, 13, 28]
         else:
             ws.title = 'Banho'
             headers = ['ID', 'Cesto', 'OP (Ordem)', 'Código', 'Texto breve', 'Qtd',
+                       'Área (m²)', 'Peso (kg)',
                        'Processo', 'Tipo', 'Operador banho',
                        'Início banho', 'Fim banho', 'Tempo banho (min)']
-            larg = [6, 7, 14, 14, 30, 7, 22, 12, 18, 19, 19, 14]
+            larg = [6, 7, 14, 14, 30, 7, 12, 12, 22, 12, 18, 19, 19, 14]
         _estilo_cabecalho(ws, headers)
         for c in cards:
             dd = c.to_dict()
             itens = dd['itens'] or [{'ordem': dd['ordem'], 'material': dd['material'],
                                      'texto_breve': dd['texto_breve'], 'quantidade': dd['quantidade']}]
             for it in itens:  # uma linha por OP
+                a_unit, p_unit = _area_peso_do_codigo(it.get('material', ''))
+                q_it = int(it.get('quantidade') or 0)
+                area_it = round(a_unit * q_it, 3)
+                peso_it = round(p_unit * q_it, 2)
                 if tipo == 'prebanho':
                     ws.append([dd['id'], dd['numero_cesto'], it['ordem'], it['material'],
-                               it['texto_breve'], it['quantidade'], dd['processo'], dd['tipo'],
+                               it['texto_breve'], it['quantidade'], area_it, peso_it,
+                               dd['processo'], dd['tipo'],
                                dd['operador_prep'], dd['operador_prep2'], dd['n_operadores'],
                                dd['prep_inicio'], dd['prep_fim'], dd['prep_minutos'], dd['observacao']])
                 else:
                     ws.append([dd['id'], dd['numero_cesto'], it['ordem'], it['material'],
-                               it['texto_breve'], it['quantidade'], dd['processo'], dd['tipo'],
+                               it['texto_breve'], it['quantidade'], area_it, peso_it,
+                               dd['processo'], dd['tipo'],
                                dd['operador_banho'], dd['banho_inicio'], dd['banho_fim'], dd['banho_minutos']])
         for i, w in enumerate(larg, 1):
             ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
@@ -817,6 +1247,8 @@ def remove_session(exc=None):
 
 
 init_db()
+carregar_lista_mestre()
+carregar_area_peso()
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

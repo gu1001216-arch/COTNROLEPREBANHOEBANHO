@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% block title %}Painel de Acompanhamento — Acesso{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo"><i class="bi bi-graph-up-arrow"></i></div>
+    <h1 class="login-title">Painel de Acompanhamento</h1>
+    <p class="login-sub">Acesso restrito · gerência</p>
+
+    {% if erro %}<div class="alert alert-err"><i class="bi bi-exclamation-triangle-fill"></i>{{ erro }}</div>{% endif %}
+
+    <form method="POST" action="{{ url_for('painel_publico') }}">
+      <div class="field">
+        <label class="label">Senha de acesso</label>
+        <input type="password" name="senha" class="input" placeholder="Digite a senha" required autofocus autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn btn-primary btn-block"><i class="bi bi-unlock-fill"></i>Acessar painel</button>
+    </form>
+
+    <div style="text-align:center;margin-top:22px;padding-top:18px;border-top:1px solid var(--line);">
+      <a href="{{ url_for('login') }}" class="small" style="color:var(--slate);font-weight:600;text-decoration:none;">
+        <i class="bi bi-box-arrow-in-right"></i> Ir para o login do sistema
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}

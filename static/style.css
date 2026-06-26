@@ -313,3 +313,6 @@ textarea.input{min-height:auto;resize:vertical;}
 .qtd-inp{width:74px;min-height:40px;text-align:center;}
 .item-op-del{background:var(--red-soft);color:var(--red);border:none;width:40px;height:40px;border-radius:9px;cursor:pointer;font-size:1rem;}
 .add-op-box{background:#fff;border:2px dashed var(--line);border-radius:11px;padding:12px;margin-bottom:14px;}
+
+.btn-danger{background:#D6473F;color:#fff;border:none;}
+.btn-danger:hover{background:#A8322B;color:#fff;}

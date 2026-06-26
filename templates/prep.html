@@ -49,6 +49,7 @@
           <button class="btn btn-ghost" style="flex:1;" id="btnPausa" onclick="togglePausa()"></button>
           <button class="btn btn-primary" style="flex:1;" onclick="pararTempo()"><i class="bi bi-stop-fill"></i>Parar tempo</button>
         </div>
+        <button class="btn btn-ghost btn-sm btn-block" style="margin-top:10px;" onclick="abrirCorrigir(cardAtual.id,cardAtual.numero_cesto)"><i class="bi bi-pencil"></i>Corrigir nº do cesto / cancelar</button>
         <p class="hint" style="margin-top:14px;">Use <strong>Pausar</strong> para café/ginástica (não conta). <strong>Parar tempo</strong> encerra para preencher.</p>
       </div>
 
@@ -84,6 +85,27 @@
     <div class="modal-foot" id="footForm" style="display:none;">
       <button class="btn btn-ghost" onclick="fecharModal()" style="flex:0 0 auto;">Cancelar</button>
       <button class="btn btn-primary" style="flex:1;" id="btnSalvar"></button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal corrigir/cancelar cesto -->
+<div class="modal-overlay" id="modalCorrigir">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-head">
+      <h5><i class="bi bi-pencil-square"></i>Corrigir cesto</h5>
+      <button class="modal-x" onclick="fecharCorrigir()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="modal-body" style="padding:22px 20px;">
+      <label class="label">Número correto do cesto</label>
+      <input type="text" id="corrigirNumero" class="input" inputmode="numeric" pattern="[0-9]*" style="margin-bottom:6px;">
+      <p class="hint" id="corrigirMsg" style="margin:0;color:var(--red);"></p>
+    </div>
+    <div class="modal-foot" style="flex-wrap:wrap;gap:8px;">
+      <button class="btn btn-danger btn-sm" onclick="cancelarCesto()" style="flex:0 0 auto;"><i class="bi bi-trash"></i>Cancelar cesto</button>
+      <div style="flex:1;"></div>
+      <button class="btn btn-ghost" onclick="fecharCorrigir()" style="flex:0 0 auto;">Voltar</button>
+      <button class="btn btn-primary" onclick="salvarNumero()" style="flex:0 0 auto;"><i class="bi bi-check-lg"></i>Salvar</button>
     </div>
   </div>
 </div>
@@ -251,6 +273,33 @@ async function salvar(){
 }
 document.getElementById('btnSalvar').addEventListener('click',salvar);
 document.getElementById('modal').addEventListener('click',e=>{if(e.target.id==='modal')fecharModal();});
+
+// corrigir / cancelar cesto (operador de pré-banho)
+let _corrigirId=null;
+function abrirCorrigir(id,numero){
+  _corrigirId=id;
+  document.getElementById('corrigirNumero').value=numero;
+  document.getElementById('corrigirMsg').textContent='';
+  fecharModal();
+  document.getElementById('modalCorrigir').classList.add('open');
+}
+function fecharCorrigir(){document.getElementById('modalCorrigir').classList.remove('open');_corrigirId=null;}
+async function salvarNumero(){
+  const novo=document.getElementById('corrigirNumero').value;
+  const msg=document.getElementById('corrigirMsg');
+  try{
+    const d=await (await fetch('/api/cesto/mudar_numero',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:_corrigirId,numero_cesto:novo})})).json();
+    if(d.sucesso){fecharCorrigir();carregar();}else{msg.textContent=d.erro||'Não foi possível alterar.';}
+  }catch(e){msg.textContent='Erro ao salvar.';}
+}
+async function cancelarCesto(){
+  if(!confirm('Tem certeza que deseja CANCELAR este cesto? Ele será removido.'))return;
+  const msg=document.getElementById('corrigirMsg');
+  try{
+    const d=await (await fetch('/api/cesto/cancelar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:_corrigirId})})).json();
+    if(d.sucesso){fecharCorrigir();carregar();}else{msg.textContent=d.erro||'Não foi possível cancelar.';}
+  }catch(e){msg.textContent='Erro ao cancelar.';}
+}
 
 carregar();setInterval(carregar,5000);setInterval(tick,1000);
 </script>
